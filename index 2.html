@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Brick Breaker</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;font-family:Arial,sans-serif;background:linear-gradient(135deg,#10172a,#1e293b);color:#fff;display:flex;justify-content:center;align-items:center;padding:20px}
+.wrap{width:min(900px,100%);text-align:center}
+h1{margin:0 0 8px;font-size:38px}
+.sub{opacity:.75;margin-bottom:18px}
+.card{background:rgba(255,255,255,.08);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,.15);border-radius:20px;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+#login{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+input{padding:13px 16px;border:0;border-radius:10px;font-size:16px;outline:none}
+button{padding:13px 20px;border:0;border-radius:10px;background:#38bdf8;color:#062033;font-weight:bold;cursor:pointer}
+button:hover{opacity:.9}
+#gameArea{display:none}
+.stats{display:flex;justify-content:space-between;max-width:760px;margin:0 auto 10px;font-weight:bold}
+canvas{display:block;width:100%;max-width:760px;height:auto;margin:auto;background:#07111f;border-radius:14px;border:1px solid rgba(255,255,255,.15)}
+.controls{margin-top:12px;opacity:.75;font-size:14px}
+#message{min-height:28px;margin:12px;font-weight:bold}
+.board{max-width:760px;margin:20px auto 0;text-align:left}
+.board h2{font-size:20px;margin:0 0 10px}
+table{width:100%;border-collapse:collapse;background:rgba(255,255,255,.05);border-radius:10px;overflow:hidden}
+th,td{padding:10px;border-bottom:1px solid rgba(255,255,255,.1)}
+th{opacity:.75;text-align:left}
+#restart{display:none;margin:10px auto}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>🧱 Brick Breaker</h1>
+<div class="sub">벽돌을 모두 깨고 최고 점수에 도전하세요!</div>
+<div class="card">
+  <div id="login">
+    <input id="nameInput" maxlength="20" placeholder="이름을 입력하세요">
+    <button id="loginBtn">게임 시작</button>
+  </div>
+
+  <div id="gameArea">
+    <div class="stats">
+      <span>👤 <span id="playerName"></span></span>
+      <span>점수: <span id="score">0</span></span>
+      <span>❤️ <span id="lives">3</span></span>
+    </div>
+    <canvas id="game" width="760" height="500"></canvas>
+    <div id="message">← → 방향키로 패들을 움직이세요.</div>
+    <button id="restart">다시 시작</button>
+    <div class="controls">PC: ← → 키 / 모바일: 화면의 왼쪽·오른쪽을 터치</div>
+
+    <div class="board">
+      <h2>🏆 실시간 TOP 10</h2>
+      <table><thead><tr><th>순위</th><th>이름</th><th>점수</th></tr></thead>
+      <tbody id="ranking"><tr><td colspan="3">기록을 불러오는 중...</td></tr></tbody></table>
+    </div>
+  </div>
+</div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getDatabase, ref, push, query, orderByChild, limitToLast, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+/* ===== Firebase 설정: 여기에 본인의 Firebase 설정을 넣으세요 ===== */
+const firebaseConfig = {
+  apiKey: "AIzaSyBqBr9dKxeS0w3kztKgaoweSH7lF83dyX8",
+  authDomain: "brick-breaker-game-1c692.firebaseapp.com",
+  databaseURL: "https://brick-breaker-game-1c692-default-rtdb.firebaseio.com",
+  projectId: "brick-breaker-game-1c692",
+  storageBucket: "brick-breaker-game-1c692.firebasestorage.app",
+  messagingSenderId: "530098609070",
+  appId: "1:530098609070:web:e832f5fde21b80cfa3063f",
+  measurementId: "G-KV372HCTYH"
+};
+/* =============================================================== */
+
+let db = null;
+let firebaseReady = false;
+try {
+  if (!firebaseConfig.apiKey.startsWith("YOUR_") && firebaseConfig.databaseURL) {
+    const app = initializeApp(firebaseConfig);
+    db = getDatabase(app);
+    firebaseReady = true;
+  }
+} catch(e) { console.warn("Firebase 설정을 확인하세요.", e); }
+
+const canvas=document.getElementById("game"),ctx=canvas.getContext("2d");
+const W=canvas.width,H=canvas.height;
+let player="",score=0,lives=3,running=false,raf;
+let ball,paddle,bricks=[];
+let keys={left:false,right:false};
+
+function resetGame(){
+  score=0;lives=3;
+  paddle={x:W/2-55,y:H-32,w:110,h:14,s:8};
+  ball={x:W/2,y:H-50,dx:4,dy:-4,r:8};
+  bricks=[];
+  const rows=5,cols=10,bw=66,bh=22,gap=7;
+  const startX=(W-(cols*bw+(cols-1)*gap))/2;
+  for(let r=0;r<rows;r++) for(let c=0;c<cols;c++)
+    bricks.push({x:startX+c*(bw+gap),y:55+r*(bh+gap),w:bw,h:bh,alive:true});
+  document.getElementById("score").textContent=score;
+  document.getElementById("lives").textContent=lives;
+  document.getElementById("message").textContent="← → 방향키로 패들을 움직이세요.";
+  document.getElementById("restart").style.display="none";
+  running=true; cancelAnimationFrame(raf); loop();
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  const grad=ctx.createLinearGradient(0,0,W,H);grad.addColorStop(0,"#0f172a");grad.addColorStop(1,"#111827");
+  ctx.fillStyle=grad;ctx.fillRect(0,0,W,H);
+  bricks.forEach((b,i)=>{if(!b.alive)return;ctx.fillStyle=`hsl(${190+i*5},80%,${55+(i%3)*7}%)`;ctx.fillRect(b.x,b.y,b.w,b.h)});
+  ctx.fillStyle="#38bdf8";ctx.fillRect(paddle.x,paddle.y,paddle.w,paddle.h);
+  ctx.beginPath();ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);ctx.fillStyle="#fff";ctx.fill();
+}
+function update(){
+  if(keys.left)paddle.x-=paddle.s;if(keys.right)paddle.x+=paddle.s;
+  paddle.x=Math.max(0,Math.min(W-paddle.w,paddle.x));
+  ball.x+=ball.dx;ball.y+=ball.dy;
+  if(ball.x-ball.r<0||ball.x+ball.r>W)ball.dx*=-1;
+  if(ball.y-ball.r<0)ball.dy*=-1;
+  if(ball.y+ball.r>paddle.y && ball.y-ball.r<paddle.y+paddle.h && ball.x>paddle.x && ball.x<paddle.x+paddle.w){
+    ball.dy=-Math.abs(ball.dy);
+    ball.dx=((ball.x-(paddle.x+paddle.w/2))/(paddle.w/2))*5;
+  }
+  for(const b of bricks) if(b.alive && ball.x>b.x && ball.x<b.x+b.w && ball.y-ball.r<b.y+b.h && ball.y+ball.r>b.y){
+    b.alive=false;ball.dy*=-1;score+=10;document.getElementById("score").textContent=score;break;
+  }
+  if(bricks.every(b=>!b.alive)){finish(true);return}
+  if(ball.y-ball.r>H){lives--;document.getElementById("lives").textContent=lives;if(lives<=0){finish(false);return}ball.x=W/2;ball.y=H-50;ball.dx=4;ball.dy=-4}
+}
+function loop(){if(!running)return;update();draw();raf=requestAnimationFrame(loop)}
+async function saveScore(){
+  if(firebaseReady) try{await push(ref(db,"scores"),{name:player,score,time:Date.now()});}catch(e){console.error(e)}
+}
+function finish(win){
+  running=false;cancelAnimationFrame(raf);
+  document.getElementById("message").textContent=win?`🎉 승리! ${score}점입니다!`:`게임 오버! ${score}점입니다.`;
+  document.getElementById("restart").style.display="inline-block";saveScore();
+}
+function loadRanking(){
+  const tbody=document.getElementById("ranking");
+  if(!firebaseReady){tbody.innerHTML='<tr><td colspan="3">Firebase 설정 후 실시간 순위가 표시됩니다.</td></tr>';return}
+  const q=query(ref(db,"scores"),orderByChild("score"),limitToLast(10));
+  onValue(q,snap=>{
+    const arr=[];snap.forEach(x=>arr.push(x.val()));arr.sort((a,b)=>b.score-a.score);
+    tbody.innerHTML=arr.map((x,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(x.name)}</td><td>${x.score}</td></tr>`).join("")||'<tr><td colspan="3">아직 기록이 없습니다.</td></tr>';
+  });
+}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
+
+document.getElementById("loginBtn").onclick=()=>{
+  const n=document.getElementById("nameInput").value.trim();if(!n){alert("이름을 입력하세요.");return}
+  player=n;document.getElementById("playerName").textContent=n;
+  document.getElementById("login").style.display="none";document.getElementById("gameArea").style.display="block";
+  loadRanking();resetGame();
+};
+document.getElementById("restart").onclick=resetGame;
+window.addEventListener("keydown",e=>{if(e.key==="ArrowLeft")keys.left=true;if(e.key==="ArrowRight")keys.right=true});
+window.addEventListener("keyup",e=>{if(e.key==="ArrowLeft")keys.left=false;if(e.key==="ArrowRight")keys.right=false});
+canvas.addEventListener("touchstart",e=>{const x=e.touches[0].clientX-canvas.getBoundingClientRect().left; if(x<canvas.clientWidth/2)keys.left=true;else keys.right=true});
+canvas.addEventListener("touchend",()=>{keys.left=false;keys.right=false});
+</script>
+</body>
+</html>
